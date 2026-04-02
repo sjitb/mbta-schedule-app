@@ -1,0 +1,4 @@
+[mbta]
+; Get a free API key at https://api-v3.mbta.com/register
+; Copy this file to config.ini and replace the placeholder with your key.
+api_key = YOUR_MBTA_API_KEY

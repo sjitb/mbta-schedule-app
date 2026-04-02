@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mbta": {
+      "command": "python",
+      "args": ["mbta_mcp_server.py"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
