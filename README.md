@@ -11,8 +11,10 @@ This project wraps the MBTA V3 API in a small async client, then exposes transit
 
 ## What This Project Includes
 
-- `mbta_client.py`: async MBTA REST client (alerts, predictions, routes, stops, schedules)
-- `mbta_mcp_server.py`: MCP server exposing MBTA tools
+- `src/mbta_mcp/mbta_client.py`: async MBTA REST client (alerts, predictions, routes, stops, schedules)
+- `src/mbta_mcp/mbta_mcp_server.py`: MCP server exposing MBTA tools
+- `src/mbta_mcp/mbta_logging.py`: structured event logging + in-memory session metrics
+- `scripts/tail_logs.py`: local log tail helper for session debugging
 - `.mcp.json`: Claude Code MCP configuration for this workspace
 - `config.ini.example`: API key template
 - `config.ini`: local API key file (ignored by git)
@@ -53,8 +55,22 @@ api_key = YOUR_MBTA_API_KEY
 
 Notes:
 
-- `mbta_client.py` loads the key from `config.ini` next to the script.
+- Runtime modules load `config.ini` from the project root.
 - `config.ini` is in `.gitignore` and should never be committed.
+
+Optional logging settings for local Phase 1 instrumentation:
+
+```ini
+[logging]
+enabled = true
+level = INFO
+directory = logs
+file_strategy = session
+session_prefix = mbta-mcp
+mirror_to_stderr = false
+```
+
+`logs/` is created automatically on first run. In `session` mode, each server start gets a timestamped `.jsonl` file under a date folder.
 
 ## Claude Code Setup
 
@@ -65,7 +81,7 @@ This repo already includes a working `.mcp.json`:
 	"mcpServers": {
 		"mbta": {
 			"command": "python",
-			"args": ["mbta_mcp_server.py"],
+			"args": ["src/mbta_mcp/mbta_mcp_server.py"],
 			"cwd": "${workspaceFolder}"
 		}
 	}
@@ -87,7 +103,7 @@ If you want the same tools in Claude Desktop, add this server to your desktop co
 	"mcpServers": {
 		"mbta": {
 			"command": "python",
-			"args": ["C:\\path\\to\\mbta-schedule-app\\mbta_mcp_server.py"]
+			"args": ["C:\\path\\to\\mbta-schedule-app\\src\\mbta_mcp\\mbta_mcp_server.py"]
 		}
 	}
 }
@@ -156,14 +172,22 @@ Commuter rail examples:
 Run the server directly:
 
 ```bash
-python mbta_mcp_server.py
+python src/mbta_mcp/mbta_mcp_server.py
 ```
 
-Quick import test:
+Quick import test (file-path mode):
 
 ```bash
-python -c "from mbta_mcp_server import mcp; print('ok')"
+python -c "import pathlib, sys; sys.path.insert(0, str(pathlib.Path('src/mbta_mcp').resolve())); from mbta_mcp_server import mcp; print('ok')"
 ```
+
+Inspect latest session logs locally:
+
+```bash
+python scripts/tail_logs.py --no-follow --filter tool_start tool_finish session_metrics
+```
+
+When Phase 1 instrumentation is enabled, local structured logs are written under `logs/YYYY-MM-DD/` as JSON Lines. This avoids writing telemetry to stdout, which would interfere with MCP stdio transport.
 
 ## Troubleshooting
 

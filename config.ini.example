@@ -2,3 +2,14 @@
 ; Get a free API key at https://api-v3.mbta.com/register
 ; Copy this file to config.ini and replace the placeholder with your key.
 api_key = YOUR_MBTA_API_KEY
+
+[logging]
+; Local structured logs for Phase 1 instrumentation.
+enabled = true
+level = INFO
+directory = logs
+; "session" creates one file per server start; "day" appends into one file per UTC day.
+file_strategy = session
+session_prefix = mbta-mcp
+; Keep false for stdio MCP unless you explicitly want duplicate logs on stderr.
+mirror_to_stderr = false
