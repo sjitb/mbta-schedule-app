@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from pathlib import Path
+import sys
+from time import perf_counter
 from typing import Any
 
 import httpx
 
+try:
+    from .mbta_logging import log_event, record_http_event
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from mbta_logging import log_event, record_http_event
+
 _BASE_URL = "https://api-v3.mbta.com"
-_CONFIG_PATH = Path(__file__).parent / "config.ini"
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.ini"
 
 
 def _load_api_key() -> str:
@@ -33,6 +42,19 @@ def _load_api_key() -> str:
 class MBTAError(Exception):
     """Raised when the MBTA API returns a non-2xx response."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str,
+        status_code: int | None = None,
+        path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.status_code = status_code
+        self.path = path
+
 
 class MBTAClient:
     """Async HTTP client for the MBTA V3 REST API.
@@ -45,15 +67,28 @@ class MBTAClient:
     An explicit *api_key* overrides the value read from config.ini.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
         self._api_key = api_key or _load_api_key()
+        self._correlation_id = correlation_id
         self._http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> MBTAClient:
+        timeout = 10.0
         self._http = httpx.AsyncClient(
             base_url=_BASE_URL,
             headers={"x-api-key": self._api_key},
-            timeout=10.0,
+            timeout=timeout,
+        )
+        log_event(
+            logging.INFO,
+            "http_client_open",
+            correlation_id=self._correlation_id,
+            base_url=_BASE_URL,
+            timeout_seconds=timeout,
         )
         return self
 
@@ -61,6 +96,12 @@ class MBTAClient:
         if self._http is not None:
             await self._http.aclose()
             self._http = None
+            log_event(
+                logging.INFO,
+                "http_client_close",
+                correlation_id=self._correlation_id,
+                base_url=_BASE_URL,
+            )
 
     async def _get(
         self, path: str, params: dict[str, Any] | None = None
@@ -69,13 +110,100 @@ class MBTAClient:
             raise RuntimeError("MBTAClient must be used as an async context manager.")
         # Drop None values so they don't get sent as the string "None"
         cleaned = {k: v for k, v in (params or {}).items() if v is not None}
-        response = await self._http.get(path, params=cleaned)
+        started = perf_counter()
+        log_event(
+            logging.INFO,
+            "http_request_start",
+            correlation_id=self._correlation_id,
+            endpoint=path,
+            params=cleaned,
+            cache_hit=False,
+        )
+        try:
+            response = await self._http.get(path, params=cleaned)
+        except httpx.TimeoutException as exc:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            log_event(
+                logging.ERROR,
+                "http_request_finish",
+                correlation_id=self._correlation_id,
+                endpoint=path,
+                duration_ms=duration_ms,
+                outcome="failure",
+                failure_category="timeout",
+                cache_hit=False,
+            )
+            record_http_event(path, "failure", "timeout", duration_ms)
+            raise MBTAError(
+                f"MBTA request timed out for {path}.",
+                category="timeout",
+                path=path,
+            ) from exc
+        except httpx.RequestError as exc:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            log_event(
+                logging.ERROR,
+                "http_request_finish",
+                correlation_id=self._correlation_id,
+                endpoint=path,
+                duration_ms=duration_ms,
+                outcome="failure",
+                failure_category="network_error",
+                cache_hit=False,
+                error=str(exc),
+            )
+            record_http_event(path, "failure", "network_error", duration_ms)
+            raise MBTAError(
+                f"Network error reaching the MBTA API for {path}: {exc}",
+                category="network_error",
+                path=path,
+            ) from exc
+
+        duration_ms = round((perf_counter() - started) * 1000, 2)
         if response.status_code >= 400:
+            if response.status_code == 429:
+                category = "rate_limit"
+            elif 400 <= response.status_code < 500:
+                category = "upstream_4xx"
+            else:
+                category = "upstream_5xx"
+
+            log_event(
+                logging.ERROR,
+                "http_request_finish",
+                correlation_id=self._correlation_id,
+                endpoint=path,
+                duration_ms=duration_ms,
+                status_code=response.status_code,
+                outcome="failure",
+                failure_category=category,
+                cache_hit=False,
+            )
+            record_http_event(path, "failure", category, duration_ms)
             raise MBTAError(
                 f"MBTA API returned HTTP {response.status_code} for {path}: "
-                f"{response.text[:300]}"
+                f"{response.text[:300]}",
+                category=category,
+                status_code=response.status_code,
+                path=path,
             )
-        return response.json()  # type: ignore[return-value]
+
+        data = response.json()  # type: ignore[assignment]
+        result_count = len(data.get("data", [])) if isinstance(data, dict) else None
+        log_event(
+            logging.INFO,
+            "http_request_finish",
+            correlation_id=self._correlation_id,
+            endpoint=path,
+            duration_ms=duration_ms,
+            status_code=response.status_code,
+            outcome="success",
+            failure_category=None,
+            cache_hit=False,
+            result_count=result_count,
+        )
+        record_http_event(path, "success", None, duration_ms)
+        return data  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Public resource methods — return raw "data" lists from the API

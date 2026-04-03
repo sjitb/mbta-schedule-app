@@ -199,8 +199,13 @@ cython_debug/
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
 
+# Local planning documents
+planning/*
+!planning/.gitkeep
+
 # Local API credentials
 config.ini
+logs/
 .cursorignore
 .cursorindexingignore
 

@@ -2,7 +2,7 @@
   "mcpServers": {
     "mbta": {
       "command": "python",
-      "args": ["mbta_mcp_server.py"],
+      "args": ["src/mbta_mcp/mbta_mcp_server.py"],
       "cwd": "${workspaceFolder}"
     }
   }
