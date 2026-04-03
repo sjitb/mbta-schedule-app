@@ -147,11 +147,51 @@ class MBTAClient:
         self,
         stop_id: str,
         route_id: str | None = None,
+        date: str | None = None,
+        min_time: str | None = None,
+        max_time: str | None = None,
+        direction_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Return scheduled trips at *stop_id*."""
+        """Return scheduled trips at *stop_id*.
+
+        Args:
+            stop_id:      Stop identifier, e.g. "place-WNatick".
+            route_id:     Optional — restrict to one route, e.g. "CR-Worcester".
+            date:         Optional — date in YYYY-MM-DD format. Defaults to today
+                          when omitted. Use tomorrow's date for next-day planning.
+            min_time:     Optional — earliest departure time as HH:MM (24-hour).
+            max_time:     Optional — latest departure time as HH:MM (24-hour).
+            direction_id: Optional — 0 (outbound) or 1 (inbound).
+        """
         params: dict[str, Any] = {
             "filter[stop]": stop_id,
             "filter[route]": route_id,
+            "filter[date]": date,
+            "filter[min_time]": min_time,
+            "filter[max_time]": max_time,
+            "filter[direction_id]": direction_id,
+            "include": "route,trip",
+            "sort": "departure_time",
         }
         data = await self._get("/schedules", params)
         return data.get("data", [])
+
+    async def get_trip_schedule(
+        self,
+        trip_id: str,
+    ) -> dict[str, Any]:
+        """Return all stops and times for a specific trip.
+
+        Args:
+            trip_id: Trip identifier obtained from a schedule or prediction result.
+
+        Returns a dict with:
+            ``data`` — list of schedule stop entries sorted by stop_sequence.
+            ``included`` — list of related stop objects keyed by ID.
+        """
+        params: dict[str, Any] = {
+            "filter[trip]": trip_id,
+            "include": "stop",
+            "sort": "stop_sequence",
+        }
+        return await self._get("/schedules", params)

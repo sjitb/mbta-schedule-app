@@ -7,6 +7,7 @@ This project wraps the MBTA V3 API in a small async client, then exposes transit
 - "Any delays on the Red Line right now?"
 - "What stops are on the Orange Line?"
 - "When is the next train at Park Street?"
+- "If I need to reach South Station by 9am tomorrow, which train do I take from West Natick?"
 
 ## What This Project Includes
 
@@ -18,11 +19,17 @@ This project wraps the MBTA V3 API in a small async client, then exposes transit
 
 ## MCP Tools Exposed To Claude
 
-1. `get_line_alerts(route_id)`
-2. `get_predictions(stop_id, route_id=None, direction_id=None)`
-3. `get_route_status(route_id)`
-4. `find_stop(name)`
-5. `get_stops_for_route(route_id, direction_id=None)`
+| Tool | Purpose |
+|---|---|
+| `get_line_alerts(route_id)` | Active service alerts for a route |
+| `get_predictions(stop_id, route_id, direction_id)` | **Real-time** next departures at a stop (current moment only) |
+| `get_route_status(route_id)` | Human-readable disruption summary for a route |
+| `find_stop(name)` | Search stops by full or partial name to get a stop ID |
+| `get_stops_for_route(route_id, direction_id)` | Ordered stop list for a route |
+| `get_schedules(stop_id, route_id, date, direction_id, max_time)` | **Planned schedule** at a stop for a specific date and time window |
+| `get_trip_schedule(trip_id)` | All stops and times for a specific trip (use to confirm arrival time at destination) |
+
+> **Real-time vs. scheduled:** Use `get_predictions` for "next train right now". Use `get_schedules` → `get_trip_schedule` for any future date or arrival-time question.
 
 ## Requirements
 
@@ -98,6 +105,7 @@ Use normal language; Claude decides when to call tools.
 - "Show line alerts for CR-Franklin"
 - "Find stops matching South Station"
 - "List stops for Orange"
+- "Show tomorrow's inbound schedule from West Natick on the Worcester line"
 
 ### Multi-step query patterns
 
@@ -115,6 +123,15 @@ Example 2: commuter rail status + departures
 3. Claude may call: `find_stop("Needham Heights")` then `get_predictions(...)`
 4. Claude combines alert context with prediction times.
 
+Example 3: future trip planning with an arrival deadline
+
+1. You ask: "If I need to reach South Station by 9am tomorrow, which train do I take from West Natick on the Worcester or Framingham line?"
+2. Claude calls: `find_stop("West Natick")` → gets stop ID `place-WNatick`
+3. Claude calls: `find_stop("South Station")` → gets stop ID `place-sstat`
+4. Claude calls: `get_schedules(stop_id="place-WNatick", route_id="CR-Worcester", date="2026-04-03", direction_id=1, max_time="09:00")`
+5. For each candidate trip, Claude calls: `get_trip_schedule(trip_id=...)` to confirm the arrival time at South Station
+6. Claude reports the latest departure from West Natick that gets you to South Station by 9am.
+
 ### Recommended prompt style
 
 - Include route ID when possible: `Red`, `Orange`, `CR-Franklin`, `Green-D`
@@ -131,7 +148,8 @@ Subway:
 
 Commuter rail examples:
 
-- `CR-Franklin`, `CR-Needham`, `CR-Providence`, `CR-Worcester`
+- `CR-Franklin`, `CR-Needham`, `CR-Providence`
+- `CR-Worcester` (also serves the Framingham line stops — West Natick, Framingham, etc.)
 
 ## Local Run / Smoke Test
 
